@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 from scipy import stats
 
-from lib.perspective import get_bird_eye_view
+from lib.perspective import get_bird_eye_view, from_bird_eye_view
 
 video = cv2.VideoCapture('dashcam1.webm')
 video.set(cv2.CAP_PROP_POS_FRAMES, 5_000)
@@ -16,24 +16,24 @@ plt.ion()
 plt.show(block=False)
 
 while True:
-    ret, frame = video.read()
+    ret, frame1 = video.read()
     if not ret:
         break
 
-    img = frame[:, :, ::-1]
+    frame = frame1[:, :, ::-1]
 
-    bird_eye_view = get_bird_eye_view(img)
+    img = get_bird_eye_view(frame)
 
-    h,w,c = bird_eye_view.shape
+    h,w,c = img.shape
     
-    gray_bird_eye_view = cv2.cvtColor(bird_eye_view, cv2.COLOR_BGR2GRAY)
-    ret, th1 = cv2.threshold(gray_bird_eye_view, 150, 255, cv2.THRESH_BINARY)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ret, th1 = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
 
     columns_summed = np.sum(th1, axis=0)
     window_size = 50
     moving_average = np.convolve(columns_summed, np.ones(window_size)/window_size, mode='same')
 
-    peaks, _ = find_peaks(moving_average, height=1000, distance=50)
+    peaks, _ = find_peaks(moving_average, height=200, distance=100)
 
     plt.cla()
     plt.plot(moving_average)
@@ -41,24 +41,37 @@ while True:
         plt.axvline(x=peak, color='r', linestyle='--')
     plt.draw()
 
+
+    empty = np.zeros_like(img)
     for peak in peaks:
-        plt.axvline(x=peak, color='r', linestyle='--')
-        x_start =peak - 50
+        x_start = peak - 50
         x_end = peak + 50
         data = th1[:, x_start:x_end]
 
-    # Fit linear regression to data
-    coefficients = np.polyfit(np.arange(data.shape[0]), data[:, 0], deg=1)
-    slope, intercept = coefficients
+        x, y = np.nonzero(data.T)
 
-    # Plot the linear regression line
-    plt.plot(np.arange(data.shape[0]), slope*np.arange(data.shape[0]) + intercept, color='g')
+        if x.size == 0:
+            continue
 
-    # Show the plot
-    plt.draw()
+        x_values = np.linspace(0, 100, 50)
+        y_values = np.polyval(np.polyfit(x, y, 2), x_values)
 
+        points = np.column_stack((x_values, y_values)).astype(np.int32) + [x_start, 0]
 
-    cv2.imshow('Bird eye view thresh', th1[:, x_start:x_end])
+        cv2.polylines(empty, [points], isClosed=False, color=(0,0,255), thickness=5)
+
+    cv2.addWeighted(img, 1, empty, 0.8, 0, img)
+
+    th1_rgb = cv2.cvtColor(th1, cv2.COLOR_GRAY2RGB)
+
+    im_v = cv2.hconcat([img, th1_rgb])
+
+    cv2.imshow('Bird eye view', im_v)
+
+    inverted = from_bird_eye_view(empty)
+    
+    output = cv2.addWeighted(inverted, 0.8, frame1, 1, 0)
+    cv2.imshow('overlay', output)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
